@@ -49,7 +49,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -101,7 +100,6 @@ import com.pietropuluche.sleepapp.ui.theme.NightPanel
 import com.pietropuluche.sleepapp.ui.theme.NightPanelSoft
 import com.pietropuluche.sleepapp.ui.theme.RestBlue
 import com.pietropuluche.sleepapp.ui.theme.SoftLilac
-import com.pietropuluche.sleepapp.ui.theme.SuccessMint
 import com.pietropuluche.sleepapp.ui.theme.TextPrimary
 import com.pietropuluche.sleepapp.ui.theme.TextSecondary
 import com.pietropuluche.sleepapp.ui.theme.WarningCoral
@@ -169,7 +167,11 @@ fun HomeScreen(
                 )
                 QuickActionCard(
                     title = "Bloqueo",
-                    subtitle = "${uiState.settings.blockedApps.count { it.isBlocked }} apps activas",
+                    subtitle = if (uiState.settings.blockedApps.any { it.isBlocked }) {
+                        "Bloqueo listo para usar"
+                    } else {
+                        "Bloqueo listo para configurar"
+                    },
                     icon = Icons.Default.Lock,
                     color = DreamPurple,
                     modifier = Modifier.weight(1f),
@@ -676,7 +678,7 @@ fun ProfileScreen(
                     checked = reminders,
                     onCheckedChange = { reminders = it }
                 )
-                Divider(color = DividerNight)
+                androidx.compose.material3.HorizontalDivider(color = DividerNight)
                 PreferenceSwitch(
                     title = "Bloqueo estricto",
                     subtitle = "Mantener bloqueo activo durante todo el horario",
@@ -959,14 +961,31 @@ private fun MovementSensorEffect(
         }
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val gravity = FloatArray(3)
+        var gravityReady = false
+        val alpha = 0.82f
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 val x = event.values.getOrNull(0) ?: 0f
                 val y = event.values.getOrNull(1) ?: 0f
                 val z = event.values.getOrNull(2) ?: 0f
-                val magnitude = sqrt(x * x + y * y + z * z)
-                val force = abs(magnitude - 9.81f)
-                if (force > 6.7f) {
+                if (!gravityReady) {
+                    gravity[0] = x
+                    gravity[1] = y
+                    gravity[2] = z
+                    gravityReady = true
+                    return
+                }
+
+                gravity[0] = alpha * gravity[0] + (1 - alpha) * x
+                gravity[1] = alpha * gravity[1] + (1 - alpha) * y
+                gravity[2] = alpha * gravity[2] + (1 - alpha) * z
+
+                val linearX = x - gravity[0]
+                val linearY = y - gravity[1]
+                val linearZ = z - gravity[2]
+                val force = sqrt(linearX * linearX + linearY * linearY + linearZ * linearZ)
+                if (force >= 0.35f) {
                     onMovementDetected(force)
                 }
             }
@@ -974,7 +993,7 @@ private fun MovementSensorEffect(
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
         if (accelerometer != null) {
-            sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_GAME)
         }
         onDispose {
             sensorManager.unregisterListener(listener)

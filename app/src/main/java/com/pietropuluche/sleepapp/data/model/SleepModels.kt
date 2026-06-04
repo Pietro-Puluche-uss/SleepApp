@@ -6,10 +6,10 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 data class SleepSettings(
-    val sleepTimeMinutes: Int = 22 * 60 + 30,
-    val wakeTimeMinutes: Int = 7 * 60,
-    val activeDays: Set<Int> = setOf(1, 2, 3, 4, 5, 6, 7),
-    val goalMinutes: Int = 8 * 60,
+    val sleepTimeMinutes: Int = 0,
+    val wakeTimeMinutes: Int = 0,
+    val activeDays: Set<Int> = emptySet(),
+    val goalMinutes: Int = 0,
     val blockedApps: List<BlockedApp> = defaultBlockedApps
 )
 
@@ -87,8 +87,12 @@ val defaultBlockedApps = listOf(
     BlockedApp("com.facebook.katana", "Facebook", "FB"),
     BlockedApp("com.twitter.android", "X / Twitter", "X"),
     BlockedApp("com.whatsapp", "WhatsApp", "WA"),
-    BlockedApp("com.android.chrome", "Chrome", "CH", isBlocked = false)
+    BlockedApp("com.android.chrome", "Chrome", "CH")
 )
+
+fun SleepSettings.isConfigured(): Boolean {
+    return goalMinutes > 0 && activeDays.isNotEmpty()
+}
 
 fun Int.asClockLabel(): String {
     val hours = (this / 60).floorMod(24)
@@ -109,12 +113,12 @@ fun Int.asDurationLabel(): String {
 fun String.asDayLabel(): String {
     return runCatching {
         val date = LocalDate.parse(this)
-        date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale("es")).replace(".", "")
+        date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.forLanguageTag("es")).replace(".", "")
     }.getOrDefault("--")
 }
 
 fun DayOfWeek.displayInitial(): String {
-    return getDisplayName(TextStyle.SHORT, Locale("es")).take(1).uppercase(Locale.getDefault())
+    return getDisplayName(TextStyle.SHORT, Locale.forLanguageTag("es")).take(1).uppercase(Locale.getDefault())
 }
 
 private fun Int.floorMod(other: Int): Int = Math.floorMod(this, other)

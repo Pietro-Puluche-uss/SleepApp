@@ -8,11 +8,18 @@ import com.pietropuluche.sleepapp.data.model.ActiveSleepMode
 import com.pietropuluche.sleepapp.data.model.SleepProfile
 import com.pietropuluche.sleepapp.data.model.SleepSession
 import com.pietropuluche.sleepapp.data.model.SleepSettings
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 class SleepStorage(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences("sleepapp_local", Context.MODE_PRIVATE)
     private val gson = Gson()
+
+    init {
+        migrateIfNeeded()
+    }
 
     fun loadSettings(): SleepSettings {
         val raw = prefs.getString(KEY_SETTINGS, null) ?: return SleepSettings()
@@ -65,14 +72,63 @@ class SleepStorage(context: Context) {
         prefs.edit { putString(KEY_PROFILE, gson.toJson(profile)) }
     }
 
-    fun isPackageBlocked(packageName: String): Boolean {
-        val active = loadActiveMode() ?: return false
-        val isStillActive = active.plannedEndMillis > System.currentTimeMillis()
-        if (!isStillActive) return false
-        return loadSettings().blockedApps.any { it.packageName == packageName && it.isBlocked }
+    fun isPackageBlocked(packageName: String, nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val blockedApps = loadSettings().blockedApps
+        if (blockedApps.none { it.packageName == packageName && it.isBlocked }) {
+            return false
+        }
+        return isSleepProtectionActive(nowMillis)
+    }
+
+    fun isSleepProtectionActive(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val active = loadActiveMode()
+        if (active != null && active.plannedEndMillis > nowMillis) {
+            return true
+        }
+        return isConfiguredSleepWindowActive(loadSettings(), nowMillis)
+    }
+
+    fun isConfiguredSleepWindowActive(
+        settings: SleepSettings = loadSettings(),
+        nowMillis: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (settings.goalMinutes <= 0 || settings.activeDays.isEmpty()) {
+            return false
+        }
+        val sleepTime = settings.sleepTimeMinutes
+        val wakeTime = settings.wakeTimeMinutes
+        if (sleepTime == wakeTime) return false
+
+        val now = ZonedDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
+        val currentMinutes = now.hour * 60 + now.minute
+        val overnight = sleepTime > wakeTime
+        val withinWindow = if (overnight) {
+            currentMinutes >= sleepTime || currentMinutes < wakeTime
+        } else {
+            currentMinutes >= sleepTime && currentMinutes < wakeTime
+        }
+        if (!withinWindow) return false
+
+        val scheduleDay = if (overnight && currentMinutes < wakeTime) {
+            now.dayOfWeek.minus(1)
+        } else {
+            now.dayOfWeek
+        }
+        return settings.activeDays.contains(scheduleDay.value)
+    }
+
+    private fun migrateIfNeeded() {
+        val currentVersion = prefs.getInt(KEY_SCHEMA_VERSION, 0)
+        if (currentVersion >= CURRENT_SCHEMA_VERSION) return
+        prefs.edit {
+            clear()
+            putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
+        }
     }
 
     companion object {
+        private const val CURRENT_SCHEMA_VERSION = 2
+        private const val KEY_SCHEMA_VERSION = "schema_version"
         private const val KEY_SETTINGS = "settings"
         private const val KEY_SESSIONS = "sessions"
         private const val KEY_ACTIVE_MODE = "active_mode"

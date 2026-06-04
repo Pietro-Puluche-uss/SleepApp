@@ -21,7 +21,7 @@ data class SleepUiState(
     val activeMode: ActiveSleepMode? = null,
     val profile: SleepProfile = SleepProfile(),
     val dashboard: SleepDashboard = SleepDashboard(
-        nextSleepLabel = "22:30",
+        nextSleepLabel = "00:00",
         lastQuality = 0,
         averageQuality = 0,
         averageSleepMinutes = 0,
@@ -89,12 +89,18 @@ class SleepViewModel(
 
     fun registerMovementSample(force: Float) {
         val now = System.currentTimeMillis()
-        if (force < MOVEMENT_THRESHOLD || now - lastMovementAtMillis < MOVEMENT_COOLDOWN_MILLIS) {
+        val (weight, cooldownMillis) = when {
+            force >= STRONG_MOVEMENT_THRESHOLD -> 3 to STRONG_MOVEMENT_COOLDOWN_MILLIS
+            force >= MODERATE_MOVEMENT_THRESHOLD -> 2 to MODERATE_MOVEMENT_COOLDOWN_MILLIS
+            force >= LIGHT_MOVEMENT_THRESHOLD -> 1 to LIGHT_MOVEMENT_COOLDOWN_MILLIS
+            else -> return
+        }
+        if (now - lastMovementAtMillis < cooldownMillis) {
             return
         }
         lastMovementAtMillis = now
         applySnapshot(
-            snapshot = repository.registerMovement(),
+            snapshot = repository.registerMovement(weight),
             successMessage = ""
         )
     }
@@ -129,7 +135,11 @@ class SleepViewModel(
     }
 
     companion object {
-        private const val MOVEMENT_THRESHOLD = 16.5f
-        private const val MOVEMENT_COOLDOWN_MILLIS = 12_000L
+        private const val LIGHT_MOVEMENT_THRESHOLD = 0.85f
+        private const val MODERATE_MOVEMENT_THRESHOLD = 2.0f
+        private const val STRONG_MOVEMENT_THRESHOLD = 4.5f
+        private const val LIGHT_MOVEMENT_COOLDOWN_MILLIS = 7_000L
+        private const val MODERATE_MOVEMENT_COOLDOWN_MILLIS = 4_000L
+        private const val STRONG_MOVEMENT_COOLDOWN_MILLIS = 2_000L
     }
 }

@@ -21,7 +21,6 @@ class SleepRepository(
 ) {
 
     fun loadState(): SleepRepositorySnapshot {
-        ensureSeedData()
         val settings = storage.loadSettings()
         val sessions = storage.loadSessions().sortedByDescending { it.startedAtMillis }
         val activeMode = storage.loadActiveMode()?.takeIf { it.plannedEndMillis > System.currentTimeMillis() }
@@ -60,12 +59,12 @@ class SleepRepository(
     fun startSleepMode(): SleepRepositorySnapshot {
         val settings = storage.loadSettings()
         val now = System.currentTimeMillis()
-        val targetMillis = settings.goalMinutes * 60_000L
+        val targetMillis = settings.goalMinutes.coerceAtLeast(1) * 60_000L
         storage.saveActiveMode(
             ActiveSleepMode(
                 startedAtMillis = now,
                 plannedEndMillis = now + targetMillis,
-                targetMinutes = settings.goalMinutes
+                targetMinutes = settings.goalMinutes.coerceAtLeast(1)
             )
         )
         return loadState()
@@ -77,9 +76,10 @@ class SleepRepository(
         return loadState()
     }
 
-    fun registerMovement(): SleepRepositorySnapshot {
+    fun registerMovement(weight: Int = 1): SleepRepositorySnapshot {
         val active = storage.loadActiveMode() ?: return loadState()
-        storage.saveActiveMode(active.copy(movementEvents = active.movementEvents + 1))
+        val safeWeight = weight.coerceIn(1, 3)
+        storage.saveActiveMode(active.copy(movementEvents = active.movementEvents + safeWeight))
         return loadState()
     }
 
@@ -88,7 +88,7 @@ class SleepRepository(
         val now = System.currentTimeMillis()
         val sleptMinutes = ((now - active.startedAtMillis) / 60_000L).toInt().coerceAtLeast(1)
         val cappedSlept = sleptMinutes.coerceAtMost(active.targetMinutes + 90)
-        val movementPenalty = active.movementEvents * 5
+        val movementPenalty = active.movementEvents * 4
         val goalRatio = (cappedSlept.toFloat() / active.targetMinutes).coerceIn(0f, 1.15f)
         val quality = (goalRatio * 92).roundToInt().coerceIn(30, 96) - movementPenalty
         val points = max(0, 40 + (quality / 3) - movementPenalty)
@@ -114,47 +114,10 @@ class SleepRepository(
         return loadState()
     }
 
-    private fun ensureSeedData() {
-        if (storage.loadSessions().isNotEmpty()) return
-        val today = LocalDate.now(clockZone)
-        val seed = listOf(
-            sessionFor(today.minusDays(6), 7 * 60 + 45, 79, 18, 2, 61),
-            sessionFor(today.minusDays(5), 8 * 60 + 5, 84, 12, 1, 69),
-            sessionFor(today.minusDays(4), 6 * 60 + 50, 68, 41, 5, 42),
-            sessionFor(today.minusDays(3), 7 * 60 + 30, 76, 22, 3, 55),
-            sessionFor(today.minusDays(2), 8 * 60 + 10, 88, 9, 1, 72),
-            sessionFor(today.minusDays(1), 7 * 60 + 23, 78, 14, 2, 63)
-        )
-        storage.saveSessions(seed.sortedByDescending { it.startedAtMillis })
-    }
-
-    private fun sessionFor(
-        date: LocalDate,
-        minutes: Int,
-        quality: Int,
-        phoneUse: Int,
-        movement: Int,
-        points: Int
-    ): SleepSession {
-        val start = date.minusDays(1).atTime(22, 40).atZone(clockZone).toInstant().toEpochMilli()
-        return SleepSession(
-            id = start,
-            date = date.toString(),
-            startedAtMillis = start,
-            endedAtMillis = start + minutes * 60_000L,
-            targetMinutes = 8 * 60,
-            sleptMinutes = minutes,
-            phoneUseBeforeBedMinutes = phoneUse,
-            movementEvents = movement,
-            qualityScore = quality,
-            pointsEarned = points
-        )
-    }
-
     private fun buildDashboard(settings: SleepSettings, sessions: List<SleepSession>): SleepDashboard {
         val recent = sessions.take(7)
         return SleepDashboard(
-            nextSleepLabel = settings.sleepTimeMinutes.asClock(),
+            nextSleepLabel = if (settings.sleepTimeMinutes > 0) settings.sleepTimeMinutes.asClock() else "00:00",
             lastQuality = sessions.firstOrNull()?.qualityScore ?: 0,
             averageQuality = recent.averageOf { it.qualityScore },
             averageSleepMinutes = recent.averageOf { it.sleptMinutes },
@@ -186,11 +149,51 @@ class SleepRepository(
         val goodNights = sessions.count { it.qualityScore >= 80 }
         val lowPhoneUse = sessions.count { it.phoneUseBeforeBedMinutes <= 15 }
         return listOf(
-            SleepAchievement("first_night", "Primera noche", "Completa tu primera sesion de sueño.", sessions.size.coerceAtMost(1), 1, "moon", sessions.isNotEmpty()),
-            SleepAchievement("streak_7", "Racha tranquila", "Duerme a tiempo 7 noches seguidas.", streak.coerceAtMost(7), 7, "fire", streak >= 7),
-            SleepAchievement("quality_5", "Sueño profundo", "Consigue 5 noches con calidad mayor a 80%.", goodNights.coerceAtMost(5), 5, "star", goodNights >= 5),
-            SleepAchievement("points_1000", "Constancia", "Acumula 1000 puntos personales.", totalPoints.coerceAtMost(1000), 1000, "trophy", totalPoints >= 1000),
-            SleepAchievement("phone_break", "Menos pantalla", "Mantén bajo el uso del celular antes de dormir.", lowPhoneUse.coerceAtMost(5), 5, "shield", lowPhoneUse >= 5)
+            SleepAchievement(
+                id = "first_night",
+                title = "Primera noche",
+                description = "Completa tu primera sesion de sueno.",
+                progress = sessions.size.coerceAtMost(1),
+                target = 1,
+                icon = "moon",
+                unlocked = sessions.isNotEmpty()
+            ),
+            SleepAchievement(
+                id = "streak_7",
+                title = "Racha tranquila",
+                description = "Duerme a tiempo 7 noches seguidas.",
+                progress = streak.coerceAtMost(7),
+                target = 7,
+                icon = "fire",
+                unlocked = streak >= 7
+            ),
+            SleepAchievement(
+                id = "quality_5",
+                title = "Sueno profundo",
+                description = "Consigue 5 noches con calidad mayor a 80%.",
+                progress = goodNights.coerceAtMost(5),
+                target = 5,
+                icon = "star",
+                unlocked = goodNights >= 5
+            ),
+            SleepAchievement(
+                id = "points_1000",
+                title = "Constancia",
+                description = "Acumula 1000 puntos personales.",
+                progress = totalPoints.coerceAtMost(1000),
+                target = 1000,
+                icon = "trophy",
+                unlocked = totalPoints >= 1000
+            ),
+            SleepAchievement(
+                id = "phone_break",
+                title = "Menos pantalla",
+                description = "Manten bajo el uso del celular antes de dormir.",
+                progress = lowPhoneUse.coerceAtMost(5),
+                target = 5,
+                icon = "shield",
+                unlocked = lowPhoneUse >= 5
+            )
         )
     }
 
@@ -210,7 +213,7 @@ class SleepRepository(
     }
 
     private fun estimatePhoneUseBeforeBed(movementEvents: Int): Int {
-        return (8 + movementEvents * 4).coerceAtMost(90)
+        return (6 + movementEvents * 3).coerceAtMost(90)
     }
 
     private fun List<SleepSession>.averageOf(selector: (SleepSession) -> Int): Int {
