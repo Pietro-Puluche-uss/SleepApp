@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">SleepApp</string>
+    <string name="sleep_block_service_label">Bloqueo inteligente de SleepApp</string>
+    <string name="sleep_block_service_description">Detecta apps abiertas durante tu horario de sueño y te devuelve a SleepApp.</string>
+</resources>
